@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SDGs性別平權</title>
+    <!-- Tailwind CSS for utility classes -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter & Noto Sans TC -->
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;600;800&display=swap" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            user-select: none;
+            touch-action: manipulation;
+        }
+
+        /* Village map container styling */
+        .village-canvas-container {
+            position: relative;
+            width: 100%;
+            max-width: 1024px;
+            aspect-ratio: 16 / 9;
+            margin: 0 auto;
+            border-radius: 1.5rem;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            background-color: #7ec850;
+        }
+
+        /* House hovering and pulse animation */
+        .hut-node {
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            cursor: pointer;
+        }
+        .hut-node:hover {
+            transform: scale(1.15) translateY(-5px);
+            filter: drop-shadow(0 10px 12px rgba(0, 0, 0, 0.3));
+        }
+
+        /* Smoke particle animation for roofs */
+        @keyframes smoke {
+            0% { transform: translateY(0) scale(0.8); opacity: 0.8; }
+            100% { transform: translateY(-20px) scale(1.8); opacity: 0; }
+        }
+        .smoke-particle {
+            animation: smoke 2.5s infinite linear;
+        }
+
+        /* Floating bounce for roof badges */
+        @keyframes floatBounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+        .float-bounce {
+            animation: floatBounce 2s infinite ease-in-out;
+        }
+
+        /* Modal pop animation */
+        @keyframes modalPop {
+            0% { transform: scale(0.8); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+        .modal-animated {
+            animation: modalPop 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        /* Confetti piece styling */
+        .confetti {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            background-color: #f00;
+            animation: fall 3s linear infinite;
+        }
+        @keyframes fall {
+            to {
+                transform: translateY(100vh) rotate(360deg);
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col justify-between p-2 md:p-4 selection:bg-rose-500 selection:text-white">
+
+    <header class="w-full max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center bg-slate-800/90 backdrop-blur-md p-4 rounded-2xl border border-slate-700 shadow-lg mb-3 gap-3">
+        <!-- Left Corner Title with SDG 5 Branding -->
+        <div class="flex items-center space-x-3 w-full sm:w-auto justify-between sm:justify-start">
+            <div class="flex items-center space-x-2">
+                <div class="w-10 h-10 rounded-xl bg-[#FF3A21] flex items-center justify-center text-white font-extrabold text-xl shadow-md border border-rose-400">
+                    5
+                </div>
+                <div>
+                    <h1 class="text-xl md:text-2xl font-black tracking-wide text-white flex items-center gap-2">
+                        SDGs 性別平權
+                    </h1>
+                    <p class="text-xs text-rose-300 font-semibold tracking-wider">GENDER EQUALITY VILLAGE</p>
+                </div>
+            </div>
+            <!-- Audio Toggle Button -->
+            <button id="soundToggleBtn" onclick="toggleSound()" class="sm:hidden p-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-rose-300 transition" title="聲音開關">
+                <i id="soundIconMob" class="fas font-solid fa-volume-high"></i>
+            </button>
+        </div>
+
+        <!-- Level Indicator and Score Counter (Top Right) -->
+        <div class="flex items-center space-x-4 w-full sm:w-auto justify-end">
+            <!-- Audio Toggle for Desktop -->
+            <button id="soundToggleBtnDesk" onclick="toggleSound()" class="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-slate-200 transition text-sm font-semibold">
+                <i id="soundIcon" class="fas fa-volume-high text-rose-400"></i>
+                <span id="soundText">音效開啟</span>
+            </button>
+
+            <!-- Level Badge -->
+            <div class="bg-indigo-900/80 border border-indigo-500 px-3 py-1.5 rounded-xl text-indigo-200 text-sm font-bold flex items-center gap-1.5 shadow-inner">
+                <i class="fas fa-map-marked-alt text-indigo-400"></i>
+                <span id="currentLevelBadge">關卡 1</span>
+            </div>
+
+            <!-- Real-time Score Box -->
+            <div class="bg-slate-900/90 border-2 border-rose-500 px-4 py-1.5 rounded-xl shadow-md flex items-center space-x-2">
+                <span class="text-xs text-slate-400 font-bold uppercase tracking-wider">答對題數</span>
+                <span id="scoreText" class="text-xl font-black text-rose-400">0 / 10</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow flex flex-col justify-center items-center w-full max-w-6xl mx-auto my-auto relative">
+        
+        <!-- Interactive Village Container -->
+        <div id="villageContainer" class="village-canvas-container relative select-none">
+            
+            <!-- Dynamic SVG Map Background -->
+            <svg id="villageMapSvg" class="w-full h-full" viewBox="0 0 1000 562.5" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+                <!-- SVG Content dynamically loaded in JavaScript -->
+            </svg>
+
+            <!-- Interactive Hut Click Overlay Layer -->
+            <div id="hutsOverlay" class="absolute inset-0 pointer-events-auto">
+                <!-- Hut interactive triggers will be generated programmatically -->
+            </div>
+
+            <!-- Onboarding Overlay Tip -->
+            <div id="guideOverlay" class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-slate-900/90 backdrop-blur-md text-slate-200 text-xs md:text-sm px-4 py-2 rounded-full border border-rose-500/50 shadow-xl flex items-center gap-2 animate-bounce pointer-events-none">
+                <i class="fas fa-hand-pointer text-rose-400"></i>
+                <span>請點擊村莊中的<b>茅草屋</b>進行性別平權問答！</span>
+            </div>
+        </div>
+    </main>
+
+    <div id="questionModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-slate-800 border-2 border-rose-500/60 rounded-3xl max-w-xl w-full p-6 md:p-8 shadow-2xl modal-animated relative overflow-hidden">
+            <!-- Modal Header -->
+            <div class="flex justify-between items-center border-b border-slate-700 pb-4 mb-4">
+                <div class="flex items-center space-x-2">
+                    <span id="modalHutBadge" class="bg-rose-500 text-white font-extrabold text-sm px-3 py-1 rounded-full shadow">
+                        茅草屋 #1
+                    </span>
+                    <span class="text-xs text-slate-400 font-semibold">SDGs 5 性別平等考驗</span>
+                </div>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white text-xl p-1 transition" title="關閉">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <!-- Question Text -->
+            <div class="mb-6">
+                <h3 id="questionTitle" class="text-lg md:text-xl font-bold text-slate-100 leading-relaxed">
+                    題目載入中...
+                </h3>
+            </div>
+
+            <!-- Options Container -->
+            <div id="optionsContainer" class="space-y-3 mb-6">
+                <!-- Dynamic Options -->
+            </div>
+
+            <!-- Feedback Box -->
+            <div id="feedbackBox" class="hidden p-4 rounded-xl mb-4 font-semibold text-sm flex items-start gap-3">
+                <i id="feedbackIcon" class="fas text-xl mt-0.5"></i>
+                <div>
+                    <div id="feedbackTitle" class="font-bold text-base"></div>
+                    <div id="feedbackText" class="text-xs md:text-sm mt-1 opacity-90"></div>
+                </div>
+            </div>
+
+            <!-- Action Buttons inside Modal -->
+            <div class="flex justify-end gap-3">
+                <button id="nextQuestionBtn" onclick="closeModal()" class="hidden w-full py-3 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-bold rounded-xl shadow-lg transition transform active:scale-95">
+                    繼續探索村莊
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="resultModal" class="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-slate-800 border-2 border-slate-600 rounded-3xl max-w-lg w-full p-8 shadow-2xl text-center modal-animated relative overflow-hidden">
+            <!-- Icon Banner -->
+            <div id="resultIconBox" class="w-24 h-24 mx-auto rounded-full flex items-center justify-center mb-4 text-4xl shadow-lg border-4">
+                <i id="resultIcon" class="fas"></i>
+            </div>
+
+            <!-- Result Title -->
+            <h2 id="resultTitle" class="text-2xl md:text-3xl font-black mb-2 text-white">
+                關卡結算中
+            </h2>
+
+            <!-- Result Subtitle / Details -->
+            <p id="resultSubtitle" class="text-slate-300 mb-6 text-sm md:text-base leading-relaxed px-4">
+                測試結果說明...
+            </p>
+
+            <!-- Score Summary Box -->
+            <div class="bg-slate-900/80 border border-slate-700 rounded-2xl p-4 mb-6 flex justify-around items-center">
+                <div>
+                    <div class="text-xs text-slate-400 font-bold">總答對題數</div>
+                    <div id="resultScore" class="text-3xl font-black text-rose-400">0 / 10</div>
+                </div>
+                <div class="h-8 w-px bg-slate-700"></div>
+                <div>
+                    <div class="text-xs text-slate-400 font-bold">通關標準</div>
+                    <div class="text-3xl font-black text-emerald-400">8 / 10</div>
+                </div>
+            </div>
+
+            <!-- Action Button -->
+            <div id="resultActionContainer" class="flex flex-col gap-3">
+                <!-- Dynamically populated button (Retry or Next Level) -->
+            </div>
+        </div>
+    </div>
+
+    <footer class="w-full max-w-6xl mx-auto mt-3 py-2 text-center text-xs text-slate-500 flex flex-col sm:flex-row justify-between items-center gap-2 border-t border-slate-800">
+        <div>支持 UN SDGs Goal 5：實現性別平等，增進所有女性賦權</div>
+        <div>SDGs 性別平權互動式地圖學習遊戲 &copy; 2026</div>
+    </footer>
+
+    <script>
+        
+        // Audio Synthesizer State (Web Audio API)
+        let soundEnabled = true;
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playSound(type) {
+            if (!soundEnabled) return;
+            try {
+                initAudio();
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                const now = audioCtx.currentTime;
+
+                if (type === 'correct') {
+                    // Happy ding-dong chord
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(523.25, now); // C5
+                    osc.frequency.setValueAtTime(659.25, now + 0.1); // E5
+                    osc.frequency.setValueAtTime(783.99, now + 0.2); // G5
+                    gain.gain.setValueAtTime(0.3, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                    osc.start(now);
+                    osc.stop(now + 0.5);
+                } else if (type === 'wrong') {
+                    // Low buzz
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(180, now);
+                    osc.frequency.setValueAtTime(130, now + 0.15);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                    osc.start(now);
+                    osc.stop(now + 0.4);
+                } else if (type === 'click') {
+                    // Subtle click
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(400, now);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+                    osc.start(now);
+                    osc.stop(now + 0.08);
+                } else if (type === 'win') {
+                    // Victory fanfare
+                    const notes = [440, 554.37, 659.25, 880];
+                    notes.forEach((freq, idx) => {
+                        const subOsc = audioCtx.createOscillator();
+                        const subGain = audioCtx.createGain();
+                        subOsc.connect(subGain);
+                        subGain.connect(audioCtx.destination);
+                        subOsc.frequency.value = freq;
+                        subGain.gain.setValueAtTime(0.2, now + idx * 0.12);
+                        subGain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.12 + 0.3);
+                        subOsc.start(now + idx * 0.12);
+                        subOsc.stop(now + idx * 0.12 + 0.3);
+                    });
+                }
+            } catch (e) {
+                console.log("Audio playback error:", e);
+            }
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+            const icon = document.getElementById('soundIcon');
+            const iconMob = document.getElementById('soundIconMob');
+            const text = document.getElementById('soundText');
+
+            if (soundEnabled) {
+                if (icon) icon.className = "fas fa-volume-high text-rose-400";
+                if (iconMob) iconMob.className = "fas fa-volume-high";
+                if (text) text.innerText = "音效開啟";
+                playSound('click');
+            } else {
+                if (icon) icon.className = "fas fa-volume-xmark text-slate-400";
+                if (iconMob) iconMob.className = "fas fa-volume-xmark";
+                if (text) text.innerText = "音效靜音";
+            }
+        }
+
+        const questionsDatabase = {
+            level1: [
+                {
+                    id: 1,
+                    question: "關於家務分工與家庭照顧負擔，下列何者符合「SDGs 性別平權」原則？",
+                    options: [
+                        "家務勞動不分性別，家庭成員應共同分擔與溝通",
+                        "照顧小孩和長輩完全是女性天生的責任",
+                        "男性外出工作賺錢就不需要參與任何家務",
+                        "家務應該全部交給年長者處理"
+                    ],
+                    answer: 0,
+                    explanation: "SDG 5.4 強調應認可並重視無償照顧與家務勞動，促進家庭內部責任共擔。"
+                },
+                {
+                    id: 2,
+                    question: "「同工同酬」是指在相同工作價值與條件下，薪資應如何發放？",
+                    options: [
+                        "依據員工的性別給予不同比例的底薪",
+                        "不分性別，提供平等的薪酬與福祉",
+                        "男性員工有撫養家庭壓力，應自動獲得更高薪資",
+                        "女性離職率可能較高，故薪資預設較低"
+                    ],
+                    answer: 1,
+                    explanation: "消除職場性別薪資差距、實現同工同酬是全球性別平權的核心目標之一。"
+                },
+                {
+                    id: 3,
+                    question: "在選擇大學專業或未來職業時，下列哪種觀念最健康合理？",
+                    options: [
+                        "理工科系只適合男生，女生不該選擇",
+                        "護理與幼教工作只適合女生發展",
+                        "打破性別刻板印象，依據個人興趣與能力自由選擇",
+                        "職業選擇應先由父母依性別傳統來決定"
+                    ],
+                    answer: 2,
+                    explanation: "性別不應成為能力或天花板的限制，鼓勵人人追求多元職業夢想。"
+                },
+                {
+                    id: 4,
+                    question: "遇到職場或校園中的「性騷擾」行為時，正確的處理方式是？",
+                    options: [
+                        "選擇隱忍不敢求助，避免破壞氣氛",
+                        "勇敢說不，並善用申訴管道或尋求專業機構協助",
+                        "檢討受害者是不是穿著或行為有問題",
+                        "將事情貼在社交平台網路罷凌對方"
+                    ],
+                    answer: 1,
+                    explanation: "面對性騷擾應零容忍，建立完善的申訴管道並給予受害者堅定的支持與協助。"
+                },
+                {
+                    id: 5,
+                    question: "「消除對婦女一切形式歧視公約」的簡稱是什麼？",
+                    options: [
+                        "CEDAW",
+                        "UNESCO",
+                        "UNICEF",
+                        "UNFPA"
+                    ],
+                    answer: 0,
+                    explanation: "CEDAW（消除對婦女一切形式歧視公約）被譽為「婦女人權宣言」。"
+                },
+                {
+                    id: 6,
+                    question: "在企業領導層與公共決策中，提升女性參與比例有何好處？",
+                    options: [
+                        "會降低決策效率與企業競爭力",
+                        "能帶來更多元包容的觀點與創新生態",
+                        "只是一種形式上的公關宣傳，無實質意義",
+                        "會導致男性員工失去升遷機會"
+                    ],
+                    answer: 1,
+                    explanation: "多元領導層能促進全面溝通與創新，推動社會與經濟永續發展。"
+                },
+                {
+                    id: 7,
+                    question: "對於玩具的性別分類（例如「男孩玩汽車、女孩玩洋娃娃」），我們應持何種態度？",
+                    options: [
+                        "嚴格遵守，從小培養傳統性別特質",
+                        "不設限性別，讓孩子依興趣自由選擇與探索世界",
+                        "禁止男孩玩洋娃娃，避免個性軟弱",
+                        "玩具只給學齡前兒童，與性別無關"
+                    ],
+                    answer: 1,
+                    explanation: "不給玩具貼性別標籤，有利於兒童全面發展創造力與情感。"
+                },
+                {
+                    id: 8,
+                    question: "聯合國 SDGs 永續發展目標中，目標 5 (Goal 5) 的主要內容是？",
+                    options: [
+                        "終結貧窮",
+                        "高品質教育",
+                        "實現性別平等，增進所有女性賦權",
+                        "氣候行動"
+                    ],
+                    answer: 2,
+                    explanation: "SDG Goal 5 專注於全球性別平等與女性賦權議題。"
+                },
+                {
+                    id: 9,
+                    question: "當看見新聞或網路上出現針對特定性別的貶抑言論時，適當的做法是？",
+                    options: [
+                        "跟著留言嘲笑與轉發",
+                        "保持批判思考，不傳播歧視言論，必要時進行檢舉或澄清",
+                        "認為與自己無關，完全無視",
+                        "對發言者進行肉搜與人身攻擊"
+                    ],
+                    answer: 1,
+                    explanation: "營造友善網路環境需要大家理性思考，拒絕傳播性別偏見與歧視。"
+                },
+                {
+                    id: 10,
+                    question: "育嬰留職停薪（育嬰假）的申請權益，適用於誰？",
+                    options: [
+                        "僅限於女性新手媽媽",
+                        "符合條件的雙親（爸爸與媽媽）皆可依法申請",
+                        "僅限於高薪主管層級",
+                        "僅限於單親家庭"
+                    ],
+                    answer: 1,
+                    explanation: "鼓勵雙親共同參與育兒，能有效減輕女性照顧壓力，落實親職平權。"
+                }
+            ],
+            level2: [
+                {
+                    id: 1,
+                    question: "全球推動 STEM（科學、技術、工程、數學）領域女性參與的主要目的為何？",
+                    options: [
+                        "打破傳統領域性別隔離，充實多元科技創新人才",
+                        "取代男性的工作機會",
+                        "只是為了湊齊特定名額的政策",
+                        "讓男性轉向從事人文學科"
+                    ],
+                    answer: 0,
+                    explanation: "消除STEM領域的性別偏見，能促進科技研發具備更全面的包容性。"
+                },
+                {
+                    id: 2,
+                    question: "什麼是「月經貧窮 (Period Poverty)」？",
+                    options: [
+                        "因經濟困難而無法負擔衛生用品，影響健康與就學工作權益",
+                        "女性在生理期無法工作的經濟損失",
+                        "國家針對女性課徵的生理稅金",
+                        "女性消費習慣不佳導致的貧窮"
+                    ],
+                    answer: 0,
+                    explanation: "消除月經貧窮與月經污名化是保障女性基本健康與教育權利的重要一環。"
+                },
+                {
+                    id: 3,
+                    question: "在國際發展中，「消除童婚與強迫婚姻」屬於 SDGs 5 的哪一項細項目標？",
+                    options: [
+                        " eliminating all harmful practices（消除所有有害習俗）",
+                        "提升數位科技使用率",
+                        "確保土地財產繼承權",
+                        "促進無償照顧勞動"
+                    ],
+                    answer: 0,
+                    explanation: "童婚嚴重侵害女童教育權與健康權，SDG 5.3 致力於全面終止有害習俗。"
+                },
+                {
+                    id: 4,
+                    question: "「玻璃天花板 (Glass Ceiling)」效應在職場上是指什麼現象？",
+                    options: [
+                        "辦公室採用透明玻璃隔間導致無隱私",
+                        "無形中的性別障礙阻止特定族群（如女性）升遷至高層",
+                        "高樓層辦公室的物理安全隱患",
+                        "工廠勞動環境缺乏安全設備"
+                    ],
+                    answer: 1,
+                    explanation: "打破玻璃天花板需要建立制度化的公平晉升機制與包容性企業文化。"
+                },
+                {
+                    id: 5,
+                    question: "「情緒勞動 (Emotional Labor)」與「無償照顧勞動」常落在哪一性別肩上居多？",
+                    options: [
+                        "歷史與社會期待往往使女性承擔較多，需推動平權共擔",
+                        "完全是由男性承擔",
+                        "政府公務員承擔最多",
+                        "科技從業者承擔最多"
+                    ],
+                    answer: 0,
+                    explanation: "關注隱性情緒勞動與照顧分工，能促進家庭與社會關係更健康平等。"
+                },
+                {
+                    id: 6,
+                    question: "推動「性別主流化 (Gender Mainstreaming)」的核心概念是什麼？",
+                    options: [
+                        "在所有立法、政策與計畫的規劃及評估中引入性別觀點",
+                        "強制規定所有機構的男女比例必須為 50:50",
+                        "建立只服務女性的獨立政府部門",
+                        "在學校只教導性別研究課程"
+                    ],
+                    answer: 0,
+                    explanation: "性別主流化確保政策資源分配考慮不同性別的需求與影響。"
+                },
+                {
+                    id: 7,
+                    question: "關於「男性性別刻板印象」（例如「男兒有淚不輕彈」、「必須堅強有錢」），下列敘述何者正確？",
+                    options: [
+                        "這有利於男性心理健康與情緒抒發",
+                        "同樣是性別框架的枷鎖，性別平權也能解放男性的情感束縛",
+                        "這是天生的生物本能，不需要改變",
+                        "只要關心女性權益即可，不必討論男性議題"
+                    ],
+                    answer: 1,
+                    explanation: "性別平權旨在打破所有有害的性別刻板印象，讓每個人都能真實展現自我。"
+                },
+                {
+                    id: 8,
+                    question: "在緊急災害防救與避難所規劃中，融入「性別敏感度」意味著什麼？",
+                    options: [
+                        "考量不同性別與族群的隱私、衛生與照顧特殊需求（如哺集乳室、夜間照明）",
+                        "將男女性別強制完全隔離在不同城市",
+                        "災害發生時優先救助單一性別",
+                        "減少物資發放以節省資源"
+                    ],
+                    answer: 0,
+                    explanation: "具備性別敏感度的防災措施能大幅提升弱勢族群的安全感與復原力。"
+                },
+                {
+                    id: 9,
+                    question: "保障女性獲取土地、金融服務與財產所有權，對永續發展有何影響？",
+                    options: [
+                        "會造成農村經濟崩潰",
+                        "能有效提升家庭生活水準、減少貧窮並改善兒童營養狀況",
+                        "對整體經濟沒有任何實質影響",
+                        "只對城市地區有顯著幫助"
+                    ],
+                    answer: 1,
+                    explanation: "赋予女性平等經濟資源控制權，是消除貧窮與促進社區發展的強效引擎。"
+                },
+                {
+                    id: 10,
+                    question: "要在日常生活中落實 SDGs 5 性別平權，最簡單有效的第一步是？",
+                    options: [
+                        "覺察並檢視自己的言語與想法，尊重每個人的多元獨特性",
+                        "指責所有不合時宜的長輩",
+                        "拒絕與不了解平權的人溝通",
+                        "等待政府強制立法調整"
+                    ],
+                    answer: 0,
+                    explanation: "平權從自我覺察開始，透過日常生活中的尊重與溝通創造改變。"
+                }
+            ]
+        };
+
+        let currentLevel = 1; // 1 or 2
+        let answeredHuts = {}; // e.g. {1: true, 2: false} (true = correct, false = wrong)
+        let activeHutIndex = null;
+        let correctCount = 0;
+
+        // Coordinates for 10 Huts on the 1000x562.5 SVG Canvas
+        const hutPositions = [
+            { x: 150, y: 160, label: "1號小屋" },
+            { x: 380, y: 130, label: "2號小屋" },
+            { x: 620, y: 150, label: "3號小屋" },
+            { x: 830, y: 180, label: "4號小屋" },
+            { x: 220, y: 310, label: "5號小屋" },
+            { x: 500, y: 280, label: "6號小屋" },
+            { x: 760, y: 320, label: "7號小屋" },
+            { x: 130, y: 440, label: "8號小屋" },
+            { x: 420, y: 430, label: "9號小屋" },
+            { x: 710, y: 440, label: "10號小屋" }
+        ];
+
+        function renderVillageMap() {
+            const svg = document.getElementById('villageMapSvg');
+            const isLevel2 = (currentLevel === 2);
+
+            // Palette
+            const bgGradStart = isLevel2 ? '#486581' : '#82c91e';
+            const bgGradEnd = isLevel2 ? '#243b53' : '#5c940d';
+            const pathColor = isLevel2 ? '#9fb3c8' : '#e9ecef';
+            const treeColor = isLevel2 ? '#102a43' : '#2b8a3e';
+            const roofColor = isLevel2 ? '#d9e2ec' : '#d97706';
+
+            let svgContent = `
+                <!-- Background Gradient -->
+                <defs>
+                    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="${bgGradStart}"/>
+                        <stop offset="100%" stop-color="${bgGradEnd}"/>
+                    </linearGradient>
+                    <linearGradient id="riverGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stop-color="#38bdf8"/>
+                        <stop offset="100%" stop-color="#0284c7"/>
+                    </linearGradient>
+                </defs>
+                <rect width="1000" height="562.5" fill="url(#bgGrad)"/>
+
+                <!-- Winding Paths through Village -->
+                <path d="M 50,200 Q 200,150 380,180 T 700,200 T 950,220" fill="none" stroke="${pathColor}" stroke-width="24" stroke-linecap="round" opacity="0.6"/>
+                <path d="M 220,310 C 250,220 380,280 500,280 C 650,280 700,380 710,440" fill="none" stroke="${pathColor}" stroke-width="20" stroke-linecap="round" opacity="0.5"/>
+                <path d="M 420,430 L 500,280 L 620,150" fill="none" stroke="${pathColor}" stroke-width="18" stroke-dasharray="10 10" opacity="0.5"/>
+
+                <!-- Meandering River -->
+                <path d="M -20,80 Q 250,300 400,100 T 1020,380" fill="none" stroke="url(#riverGrad)" stroke-width="32" opacity="0.8"/>
+                
+                <!-- Wooden Bridges -->
+                <rect x="235" y="165" width="40" height="20" fill="#78350f" rx="3" transform="rotate(25, 255, 175)"/>
+                <rect x="800" y="305" width="45" height="22" fill="#78350f" rx="3" transform="rotate(-15, 822, 316)"/>
+
+                <!-- Scenic Trees & Decorative Elements -->
+                <!-- Forest Cluster Top Left -->
+                <circle cx="60" cy="80" r="35" fill="${treeColor}" opacity="0.9"/>
+                <circle cx="95" cy="110" r="28" fill="${treeColor}" opacity="0.8"/>
+                <circle cx="50" cy="130" r="30" fill="${treeColor}" opacity="0.85"/>
+                
+                <!-- Forest Cluster Right Side -->
+                <circle cx="920" cy="90" r="40" fill="${treeColor}" opacity="0.9"/>
+                <circle cx="960" cy="140" r="30" fill="${treeColor}" opacity="0.8"/>
+                
+                <!-- Center Trees -->
+                <circle cx="310" cy="380" r="25" fill="${treeColor}"/>
+                <circle cx="600" cy="480" r="32" fill="${treeColor}"/>
+                <circle cx="880" cy="460" r="28" fill="${treeColor}"/>
+            `;
+
+            svg.innerHTML = svgContent;
+
+            // Render interactive HTML Hut layer over SVG
+            renderHutOverlays();
+        }
+
+        function renderHutOverlays() {
+            const overlay = document.getElementById('hutsOverlay');
+            overlay.innerHTML = '';
+
+            hutPositions.forEach((pos, index) => {
+                const hutNumber = index + 1;
+                const status = answeredHuts[hutNumber]; // true, false, or undefined
+
+                // Badge styling depending on answer state
+                let badgeBg = "bg-amber-500 text-white";
+                let badgeIcon = `<i class="fas fa-question text-xs"></i>`;
+                let glowStyle = "shadow-md";
+
+                if (status === true) {
+                    badgeBg = "bg-emerald-500 text-white ring-4 ring-emerald-300/50";
+                    badgeIcon = `<i class="fas fa-check text-xs"></i>`;
+                    glowStyle = "shadow-emerald-500/50 shadow-lg";
+                } else if (status === false) {
+                    badgeBg = "bg-rose-500 text-white ring-4 ring-rose-300/50";
+                    badgeIcon = `<i class="fas fa-times text-xs"></i>`;
+                    glowStyle = "shadow-rose-500/50 shadow-lg";
+                }
+
+                const isLevel2 = (currentLevel === 2);
+                const hutWallColor = isLevel2 ? "#94a3b8" : "#fde047";
+                const roofColor = isLevel2 ? "#e2e8f0" : "#d97706";
+
+                const hutElem = document.createElement('div');
+                hutElem.className = `hut-node absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center group`;
+                hutElem.style.left = `${(pos.x / 1000) * 100}%`;
+                hutElem.style.top = `${(pos.y / 562.5) * 100}%`;
+                hutElem.onclick = () => openQuestionModal(hutNumber);
+
+                hutElem.innerHTML = `
+                    <!-- Floating Indicator Pin -->
+                    <div class="float-bounce mb-1 flex items-center justify-center">
+                        <span class="${badgeBg} ${glowStyle} px-2 py-0.5 rounded-full text-xs font-bold flex items-center gap-1 shadow-md transition-all">
+                            ${badgeIcon}
+                            <span>${pos.label}</span>
+                        </span>
+                    </div>
+
+                    <!-- Thatched Hut Graphic (SVG) -->
+                    <div class="relative w-12 h-12 md:w-16 md:h-16">
+                        <!-- Smoke from Chimney -->
+                        <div class="absolute -top-3 right-2 w-2 h-2 bg-slate-200/80 rounded-full smoke-particle"></div>
+
+                        <svg viewBox="0 0 100 100" class="w-full h-full drop-shadow-md">
+                            <!-- Walls -->
+                            <rect x="20" y="45" width="60" height="45" rx="4" fill="${hutWallColor}" stroke="#78350f" stroke-width="3"/>
+                            <!-- Door -->
+                            <rect x="40" y="60" width="20" height="30" rx="2" fill="#78350f"/>
+                            <!-- Window -->
+                            <circle cx="32" cy="58" r="6" fill="#fef08a" stroke="#78350f" stroke-width="2"/>
+                            <circle cx="68" cy="58" r="6" fill="#fef08a" stroke="#78350f" stroke-width="2"/>
+                            <!-- Thatched Roof -->
+                            <path d="M 10,48 L 50,10 L 90,48 Z" fill="${roofColor}" stroke="#78350f" stroke-width="4" stroke-linejoin="round"/>
+                            <!-- Roof Lines Pattern -->
+                            <path d="M 25,35 L 50,15 L 75,35" fill="none" stroke="#b45309" stroke-width="2"/>
+                        </svg>
+                    </div>
+                `;
+
+                overlay.appendChild(hutElem);
+            });
+        }
+
+        function openQuestionModal(hutNumber) {
+            playSound('click');
+            activeHutIndex = hutNumber;
+            const currentQuestions = (currentLevel === 1) ? questionsDatabase.level1 : questionsDatabase.level2;
+            const qData = currentQuestions[hutNumber - 1];
+
+            document.getElementById('modalHutBadge').innerText = `第 ${currentLevel} 關 - 茅草屋 #${hutNumber}`;
+            document.getElementById('questionTitle').innerText = `${hutNumber}. ${qData.question}`;
+
+            const optionsContainer = document.getElementById('optionsContainer');
+            optionsContainer.innerHTML = '';
+
+            const feedbackBox = document.getElementById('feedbackBox');
+            feedbackBox.className = "hidden";
+
+            const nextBtn = document.getElementById('nextQuestionBtn');
+            nextBtn.className = "hidden";
+
+            const isAlreadyAnswered = answeredHuts.hasOwnProperty(hutNumber);
+
+            qData.options.forEach((optText, optIdx) => {
+                const btn = document.createElement('button');
+                btn.className = `w-full text-left p-4 rounded-xl border-2 transition font-semibold text-sm md:text-base flex items-center justify-between group
+                    ${isAlreadyAnswered ? 'cursor-not-allowed opacity-80' : 'hover:border-rose-400 hover:bg-slate-700/80 active:scale-98'}
+                    bg-slate-700/50 border-slate-600 text-slate-100`;
+                
+                btn.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <span class="w-7 h-7 rounded-lg bg-slate-800 border border-slate-600 group-hover:border-rose-400 flex items-center justify-center text-xs font-bold text-rose-400">
+                            ${String.fromCharCode(65 + optIdx)}
+                        </span>
+                        <span>${optText}</span>
+                    </div>
+                    <i class="fas fa-chevron-right text-slate-500 group-hover:text-rose-400 text-xs"></i>
+                `;
+
+                if (!isAlreadyAnswered) {
+                    btn.onclick = () => submitAnswer(hutNumber, optIdx, qData);
+                } else {
+                    btn.disabled = true;
+                    if (optIdx === qData.answer) {
+                        btn.classList.add('border-emerald-500', 'bg-emerald-950/40');
+                    }
+                }
+
+                optionsContainer.appendChild(btn);
+            });
+
+            // If already answered, show previous result
+            if (isAlreadyAnswered) {
+                showFeedback(answeredHuts[hutNumber], qData);
+            }
+
+            document.getElementById('questionModal').classList.remove('hidden');
+        }
+
+        function submitAnswer(hutNumber, selectedIndex, qData) {
+            const isCorrect = (selectedIndex === qData.answer);
+            answeredHuts[hutNumber] = isCorrect;
+
+            if (isCorrect) {
+                correctCount++;
+                playSound('correct');
+            } else {
+                playSound('wrong');
+            }
+
+            updateScoreDisplay();
+            renderHutOverlays();
+            showFeedback(isCorrect, qData);
+
+            // Check if all 10 huts in the level are completed
+            if (Object.keys(answeredHuts).length === 10) {
+                setTimeout(() => {
+                    closeModal();
+                    evaluateLevelCompletion();
+                }, 1800);
+            }
+        }
+
+        function showFeedback(isCorrect, qData) {
+            const feedbackBox = document.getElementById('feedbackBox');
+            const feedbackIcon = document.getElementById('feedbackIcon');
+            const feedbackTitle = document.getElementById('feedbackTitle');
+            const feedbackText = document.getElementById('feedbackText');
+            const nextBtn = document.getElementById('nextQuestionBtn');
+
+            feedbackBox.classList.remove('hidden');
+
+            if (isCorrect) {
+                feedbackBox.className = "p-4 rounded-xl mb-4 font-semibold text-sm flex items-start gap-3 bg-emerald-900/60 border border-emerald-500 text-emerald-200";
+                feedbackIcon.className = "fas fa-circle-check text-emerald-400 text-2xl mt-0.5";
+                feedbackTitle.innerText = "答對了！太棒了！";
+            } else {
+                feedbackBox.className = "p-4 rounded-xl mb-4 font-semibold text-sm flex items-start gap-3 bg-rose-900/60 border border-rose-500 text-rose-200";
+                feedbackIcon.className = "fas fa-circle-xmark text-rose-400 text-2xl mt-0.5";
+                feedbackTitle.innerText = `答錯了！正確答案是：（${String.fromCharCode(65 + qData.answer)}）`;
+            }
+
+            feedbackText.innerText = qData.explanation;
+
+            nextBtn.classList.remove('hidden');
+            nextBtn.className = "w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl shadow transition";
+        }
+
+        function closeModal() {
+            playSound('click');
+            document.getElementById('questionModal').classList.add('hidden');
+        }
+
+        function updateScoreDisplay() {
+            const scoreText = document.getElementById('scoreText');
+            scoreText.innerText = `${correctCount} / 10`;
+            
+            const currentLevelBadge = document.getElementById('currentLevelBadge');
+            currentLevelBadge.innerText = `關卡 ${currentLevel}`;
+        }
+
+        function evaluateLevelCompletion() {
+            const resultModal = document.getElementById('resultModal');
+            const resultIconBox = document.getElementById('resultIconBox');
+            const resultIcon = document.getElementById('resultIcon');
+            const resultTitle = document.getElementById('resultTitle');
+            const resultSubtitle = document.getElementById('resultSubtitle');
+            const resultScore = document.getElementById('resultScore');
+            const actionContainer = document.getElementById('resultActionContainer');
+
+            resultScore.innerText = `${correctCount} / 10`;
+            actionContainer.innerHTML = '';
+
+            const isPass = correctCount >= 8;
+
+            if (isPass) {
+                playSound('win');
+                resultIconBox.className = "w-24 h-24 mx-auto rounded-full flex items-center justify-center mb-4 text-4xl shadow-lg border-4 bg-emerald-900/80 border-emerald-400 text-emerald-300";
+                resultIcon.className = "fas fa-trophy animate-bounce";
+
+                if (currentLevel === 1) {
+                    resultTitle.innerText = "恭喜通關第一關！";
+                    resultSubtitle.innerText = "您展現了卓越的 SDGs 性別平權觀念！準備好挑戰難度更高的第二村莊了嗎？";
+
+                    const nextLevelBtn = document.createElement('button');
+                    nextLevelBtn.className = "w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-black rounded-xl shadow-lg text-lg transition transform active:scale-95 flex items-center justify-center gap-2";
+                    nextLevelBtn.innerHTML = `<span>前往下一關 (Level 2)</span> <i class="fas fa-arrow-right"></i>`;
+                    nextLevelBtn.onclick = () => loadLevel(2);
+                    actionContainer.appendChild(nextLevelBtn);
+                } else {
+                    // Level 2 Grand Final Victory
+                    resultTitle.innerText = "榮獲「SDGs 性別平權大使」！";
+                    resultSubtitle.innerText = "太傑出了！您已全面解鎖兩大關卡，具備極高的性別平權意識與永續發展知能！";
+
+                    const restartAllBtn = document.createElement('button');
+                    restartAllBtn.className = "w-full py-3.5 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-black rounded-xl shadow-lg text-lg transition transform active:scale-95 flex items-center justify-center gap-2";
+                    restartAllBtn.innerHTML = `<i class="fas fa-redo"></i> <span>重新體驗遊戲</span>`;
+                    restartAllBtn.onclick = () => loadLevel(1);
+                    actionContainer.appendChild(restartAllBtn);
+
+                    createConfettiEffect();
+                }
+            } else {
+                playSound('wrong');
+                resultIconBox.className = "w-24 h-24 mx-auto rounded-full flex items-center justify-center mb-4 text-4xl shadow-lg border-4 bg-rose-900/80 border-rose-400 text-rose-300";
+                resultIcon.className = "fas fa-heart-crack";
+
+                resultTitle.innerText = "挑戰失敗！";
+                resultSubtitle.innerText = "性別平權意識仍需努力！答對題數需達到 8 題以上才能通關喔！";
+
+                const retryBtn = document.createElement('button');
+                retryBtn.className = "w-full py-3.5 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-black rounded-xl shadow-lg text-lg transition transform active:scale-95 flex items-center justify-center gap-2";
+                retryBtn.innerHTML = `<i class="fas fa-rotate-right"></i> <span>重新挑戰關卡 ${currentLevel}</span>`;
+                retryBtn.onclick = () => {
+                    // Reload page or reset level
+                    if (currentLevel === 1) {
+                        window.location.reload();
+                    } else {
+                        loadLevel(2);
+                    }
+                };
+                actionContainer.appendChild(retryBtn);
+            }
+
+            resultModal.classList.remove('hidden');
+        }
+
+        function loadLevel(levelNum) {
+            playSound('click');
+            currentLevel = levelNum;
+            answeredHuts = {};
+            correctCount = 0;
+
+            document.getElementById('resultModal').classList.add('hidden');
+            updateScoreDisplay();
+            renderVillageMap();
+        }
+
+        /* Confetti Effect for Final Game Victory */
+        function createConfettiEffect() {
+            const colors = ['#f43f5e', '#10b981', '#3b82f6', '#f59e0b', '#8b5cf6'];
+            for (let i = 0; i < 50; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                confetti.style.left = Math.random() * 100 + 'vw';
+                confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                confetti.style.animationDuration = (Math.random() * 2 + 2) + 's';
+                confetti.style.opacity = Math.random();
+                document.body.appendChild(confetti);
+
+                setTimeout(() => confetti.remove(), 4000);
+            }
+        }
+
+        /* Initial Game Launch on Window Load */
+        window.onload = function () {
+            renderVillageMap();
+            updateScoreDisplay();
+        };
+    </script>
+</body>
+</html>
